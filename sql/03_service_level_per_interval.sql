@@ -11,8 +11,9 @@
 -- We divide by OFFERED (everyone who called), so contacts who gave up count against us.
 -- Dividing by answered instead would look better but hides the abandons.
 -- Target "80/20": 80% of contacts answered within 20 seconds.
--- 3 intervals have zero contacts: their service level is undefined, so it is left empty (NULL)
--- instead of crashing with a division by zero.
+-- 3 intervals have zero contacts: their service level is undefined, so it is left empty (NULL).
+-- NULLIF(offered, 0) makes that explicit. SQLite would return NULL for x / 0 anyway, but
+-- PostgreSQL, SQL Server and others raise an error, so this form is portable.
 
 SELECT
     date,

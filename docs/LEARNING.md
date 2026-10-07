@@ -189,7 +189,7 @@ ORDER BY date, interval_start, queue;
 |---|---|
 | `date, interval_start, queue, offered, answered_within_20s,` | Plain columns, copied as they are, so you can see the numbers behind the percentage. |
 | `100.0 * answered_within_20s / ...` | Turn the fraction into a percentage. `100.0` (with the `.0`) forces decimal maths, see Query 2. |
-| `NULLIF(offered, 0)` | Returns `offered` normally, but returns `NULL` ("unknown") when `offered` is 0. **Why:** dividing by 0 is impossible. Dividing by `NULL` just gives `NULL`, so the query keeps going instead of failing. 3 intervals in our data really have zero contacts (all Support-DE, at 18:00 / 19:00 / 19:30). |
+| `NULLIF(offered, 0)` | Returns `offered` normally, but returns `NULL` ("unknown") when `offered` is 0. **Why:** dividing by 0 is impossible, and the result for those rows must be "unknown". Dividing by `NULL` gives `NULL`. (SQLite would give `NULL` for `x / 0` on its own, but many databases, e.g. PostgreSQL and SQL Server, stop with an error. `NULLIF` makes the intent explicit and works everywhere.) 3 intervals in our data really have zero contacts (all Support-DE, at 18:00 / 19:00 / 19:30). |
 | `ROUND(..., 1) AS service_level_pct` | One decimal, and a readable column name. |
 | `CASE ... END` | SQL's version of if / else. It reads top to bottom and the **first match wins**. |
 | `WHEN offered = 0 THEN NULL` | No contacts, so no verdict (neither pass nor fail). |
