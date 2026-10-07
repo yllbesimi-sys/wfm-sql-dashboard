@@ -2,6 +2,8 @@
 
 A workforce-management (WFM) dashboard for a **fictional** contact center. Every metric (service level, abandon rate, forecast accuracy, staffing gap, adherence) is calculated by a plain SQL query in [`/sql`](sql/), and the dashboard shows the exact query next to each chart.
 
+**Live demo: [wfm-sql-dashboard.vercel.app](https://wfm-sql-dashboard.vercel.app)**
+
 ![The dashboard: service level hero, KPI tiles, forecast vs actual chart, service-level heatmap and staffing-gap chart](docs/images/dashboard-desktop.png)
 
 > **Honesty notes**
@@ -39,7 +41,7 @@ It works on a phone too:
 <img src="docs/images/dashboard-mobile.png" alt="The dashboard on a phone-sized screen" width="320">
 
 ```bash
-python scripts/export_dashboard.py                        # run the SQL, write dashboard/data/*.json
+python scripts/export_dashboard.py                        # run the SQL, write dashboard/data/*.json   (the live demo is this folder, served as-is)
 python -m http.server 8000 --directory dashboard          # then open http://localhost:8000
 ```
 

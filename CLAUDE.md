@@ -45,5 +45,7 @@ project for job applications, so it must be honest, clean, and explainable.
   runs `sql/dashboard/*.sql` and writes `dashboard/data/*.json` (committed). After changing the SQL or the database,
   re-run the export, then `python scripts/verify_queries.py` (it fails if the JSON is stale). The JS only adds up the
   SQL's building blocks and divides; it must never define a metric.
+- Deployment: Vercel project `wfm-sql-dashboard` (personal account), root directory `dashboard/`, no build step, auto-deploys
+  on every push to `main`. Live at https://wfm-sql-dashboard.vercel.app. Re-export the JSON before pushing SQL/data changes.
 - Git remote: https://github.com/yllbesimi-sys/wfm-sql-dashboard.git (branch `main`).
   This folder is its own git repo; the home folder above it is a different repo — never commit there.
