@@ -1,6 +1,6 @@
 -- Question: By hour of the day, how many agents were needed compared with scheduled, and how often were we short?
 --
--- Feeds: dashboard bar chart "Staffing gap by hour" and KPI card 6 "Short-staffed intervals".
+-- Feeds: dashboard bar chart "Staffing gap by hour" and the "Short-staffed intervals" tile.
 --
 -- Why a WFM analyst cares: shows WHICH hours are structurally thin or generous, which is what
 -- shift start times and lunch placement can fix.

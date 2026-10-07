@@ -1,6 +1,7 @@
 -- Question: What are the building blocks of the headline KPIs, per day and queue?
 --
--- Feeds: dashboard KPI cards 1-5 (Offered, Service level, Abandon rate, AHT, Forecast error).
+-- Feeds: the dashboard's service-level hero and its Offered contacts, Abandon rate, Average handle
+-- time and Forecast error tiles.
 --
 -- Why this shape: the dashboard lets you pick any queue and any date range, with no server.
 -- So this query exports one row per day per queue holding the numerators and denominators.

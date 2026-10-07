@@ -274,7 +274,7 @@ function makeCharts() {
       },
       scales: {
         x: { grid: { display: false }, border: { color: css("--base") },
-          ticks: { maxTicksLimit: 8, maxRotation: 0, callback(v) { return date(this.getLabelForValue(v), { day: "numeric", month: "short" }); } } },
+          ticks: { maxTicksLimit: matchMedia("(max-width: 520px)").matches ? 5 : 8, maxRotation: 0, callback(v) { return date(this.getLabelForValue(v), { day: "numeric", month: "short" }); } } },
         y: { beginAtZero: true, border: { display: false }, grid: { color: css("--grid") }, ticks: { callback: (v) => nf.format(v) } },
       },
     },

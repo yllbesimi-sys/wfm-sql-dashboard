@@ -1,6 +1,6 @@
 # SQL learning notes
 
-Plain-language explanations of every query in this project, written as I go. Query explanations start in Milestone 2.
+Plain-language explanations of every query in this project, written as the queries were built.
 
 ## Basics you need first
 
@@ -567,7 +567,7 @@ Worked example, Support-EN for the first week (2026-08-03 to 2026-08-08), six da
 
 ### D1 — KPI building blocks per day and queue
 
-**File:** `sql/dashboard/01_kpi_daily.sql` · **Feeds:** KPI cards 1–5
+**File:** `sql/dashboard/01_kpi_daily.sql` · **Feeds:** the service-level hero and the Offered, Abandon rate, Average handle time and Forecast error tiles
 **Business question:** What are the building blocks of the headline KPIs, per day and queue?
 
 ```sql
@@ -660,7 +660,7 @@ ORDER BY date, queue, hour;
 
 ### D4 — Staffing building blocks per hour
 
-**File:** `sql/dashboard/04_staffing_gap_hourly.sql` · **Feeds:** the staffing chart and KPI card 6
+**File:** `sql/dashboard/04_staffing_gap_hourly.sql` · **Feeds:** the staffing chart and the Short-staffed intervals tile
 **Business question:** By hour of the day, how many agents were needed compared with scheduled, and how often were we short?
 
 ```sql
