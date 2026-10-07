@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WFM Dashboard</title>
+<meta name="description" content="Workforce-management dashboard for a fictional contact center. Every metric comes from a plain SQL query you can read on the page.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <div class="title-row">
+      <h1>Workforce management dashboard</h1>
+      <span class="badge">Fictional, synthetic data</span>
+    </div>
+    <p class="lede">A made-up contact center with three queues. Each number comes from a SQL query; open “Show the SQL” under any chart to read it.</p>
+
+    <div class="filters" role="group" aria-label="Filters">
+      <label>Queue
+        <select id="f-queue"></select>
+      </label>
+      <label>From
+        <input type="date" id="f-from">
+      </label>
+      <label>To
+        <input type="date" id="f-to">
+      </label>
+      <button type="button" id="f-reset" class="btn">Reset</button>
+      <p id="f-status" class="status" aria-live="polite"></p>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <p id="error" class="error" role="alert" hidden></p>
+  <noscript><p class="error">This dashboard needs JavaScript to draw the charts.</p></noscript>
+
+  <section class="hero" aria-labelledby="hero-label">
+    <div class="hero-main">
+      <h2 id="hero-label" class="label">Service level (80/20 target)</h2>
+      <p class="hero-value"><span id="k-sl">–</span><span class="unit">%</span></p>
+      <p id="k-sl-verdict" class="verdict"></p>
+    </div>
+    <div class="meter-wrap">
+      <div class="meter" id="k-sl-meter" role="img" aria-label="Service level against the 80 percent target">
+        <div class="meter-fill" id="k-sl-fill"></div>
+        <div class="meter-target"><span>80% target</span></div>
+      </div>
+      <div class="meter-scale"><span>0%</span><span>100%</span></div>
+    </div>
+  </section>
+
+  <section class="kpis" aria-label="Key figures">
+    <div class="kpi">
+      <h2 class="label">Offered contacts</h2>
+      <p class="kpi-value" id="k-offered">–</p>
+      <p class="kpi-note">Contacts that arrived</p>
+    </div>
+    <div class="kpi">
+      <h2 class="label">Abandon rate</h2>
+      <p class="kpi-value" id="k-abandon">–</p>
+      <p class="kpi-note">Hung up before an agent answered</p>
+    </div>
+    <div class="kpi">
+      <h2 class="label">Average handle time</h2>
+      <p class="kpi-value" id="k-aht">–</p>
+      <p class="kpi-note">Minutes:seconds per answered contact</p>
+    </div>
+    <div class="kpi">
+      <h2 class="label">Forecast error</h2>
+      <p class="kpi-value" id="k-wape">–</p>
+      <p class="kpi-note">Contacts the forecast missed by, as a share of actual (WAPE)</p>
+    </div>
+    <div class="kpi">
+      <h2 class="label">Short-staffed intervals</h2>
+      <p class="kpi-value" id="k-short">–</p>
+      <p class="kpi-note">Half-hours with fewer agents scheduled than needed</p>
+    </div>
+  </section>
+  <div class="tools tools-flat">
+    <button type="button" class="btn-link" data-toggle="sql-kpi" aria-expanded="false">Show the SQL</button>
+  </div>
+  <div class="region" id="sql-kpi" data-sql="01_kpi_daily" data-extra="04_staffing_gap_hourly" hidden></div>
+
+  <section class="panel" aria-labelledby="t-forecast">
+    <div class="panel-head">
+      <div>
+        <h2 id="t-forecast">Forecast vs actual volume</h2>
+        <p class="sub">Contacts per day, selected queues combined</p>
+      </div>
+      <ul class="legend" aria-label="Legend">
+        <li><span class="key key-actual"></span>Actual offered</li>
+        <li><span class="key key-forecast"></span>Forecast</li>
+      </ul>
+    </div>
+    <div class="chart-box"><canvas id="c-forecast" role="img" aria-label="Line chart of daily forecast and actual contacts"></canvas></div>
+    <div class="tools">
+      <button type="button" class="btn-link" data-toggle="sql-forecast" aria-expanded="false">Show the SQL</button>
+      <button type="button" class="btn-link" data-toggle="table-forecast" aria-expanded="false">View as table</button>
+    </div>
+    <div class="region" id="sql-forecast" data-sql="02_forecast_vs_actual_daily" hidden></div>
+    <div class="region table-region" id="table-forecast" hidden></div>
+  </section>
+
+  <div class="two-col">
+    <section class="panel" aria-labelledby="t-heat">
+      <div class="panel-head">
+        <div>
+          <h2 id="t-heat">Service level by weekday and hour</h2>
+          <p class="sub" id="s-heat">Percent of contacts answered within 20 seconds</p>
+        </div>
+      </div>
+      <div class="heat-scroll"><table class="heat" id="heat"></table></div>
+      <div class="scale" aria-hidden="true">
+        <div class="scale-bar"></div>
+        <div class="scale-ticks"><span style="left:0">40 or less</span><span style="left:66.7%">80 target</span><span style="left:100%">100</span></div>
+      </div>
+      <div class="tools">
+        <button type="button" class="btn-link" data-toggle="sql-heat" aria-expanded="false">Show the SQL</button>
+      </div>
+      <div class="region" id="sql-heat" data-sql="03_service_level_heatmap" hidden></div>
+    </section>
+
+    <section class="panel" aria-labelledby="t-staff">
+      <div class="panel-head">
+        <div>
+          <h2 id="t-staff">Staffing gap by hour</h2>
+          <p class="sub" id="s-staff">Average agents scheduled minus agents needed, per half-hour</p>
+        </div>
+        <ul class="legend" aria-label="Legend">
+          <li><span class="key key-short"></span>Short</li>
+          <li><span class="key key-surplus"></span>Surplus</li>
+        </ul>
+      </div>
+      <div class="chart-box"><canvas id="c-staff" role="img" aria-label="Bar chart of the average staffing gap by hour"></canvas></div>
+      <div class="tools">
+        <button type="button" class="btn-link" data-toggle="sql-staff" aria-expanded="false">Show the SQL</button>
+        <button type="button" class="btn-link" data-toggle="table-staff" aria-expanded="false">View as table</button>
+      </div>
+      <div class="region" id="sql-staff" data-sql="04_staffing_gap_hourly" hidden></div>
+      <div class="region table-region" id="table-staff" hidden></div>
+    </section>
+  </div>
+</main>
+
+<footer class="wrap foot">
+  <p>All data is fictional and generated by a script with a fixed random seed. No real employer, customer or employee data was used. This project was built with AI assistance.</p>
+  <p>The staffing need uses a deliberately simple formula (workload ÷ 85% occupancy), not Erlang C, and has no shrinkage. The SQL files calculate the building blocks; this page only adds up the rows you select and divides.</p>
+  <p><a href="https://github.com/yllbesimi-sys/wfm-sql-dashboard">Source code, SQL files and explanations on GitHub</a></p>
+</footer>
+
+<div id="tip" class="tip" role="status" hidden></div>
+
+<script src="vendor/chart.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

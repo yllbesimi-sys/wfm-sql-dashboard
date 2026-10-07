@@ -41,5 +41,9 @@ project for job applications, so it must be honest, clean, and explainable.
 - Service level target: 80/20 (80% of contacts answered within 20 seconds).
 - Staffing formula is deliberately simple (workload hours / occupancy target); Erlang C is the
   industry-standard next step and must be mentioned in the docs.
+- Dashboard: static site in `dashboard/` (plain HTML/CSS/JS + vendored Chart.js 4.4.7). `scripts/export_dashboard.py`
+  runs `sql/dashboard/*.sql` and writes `dashboard/data/*.json` (committed). After changing the SQL or the database,
+  re-run the export, then `python scripts/verify_queries.py` (it fails if the JSON is stale). The JS only adds up the
+  SQL's building blocks and divides; it must never define a metric.
 - Git remote: https://github.com/yllbesimi-sys/wfm-sql-dashboard.git (branch `main`).
   This folder is its own git repo; the home folder above it is a different repo — never commit there.

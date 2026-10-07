@@ -22,7 +22,7 @@ abandon rate, forecast accuracy, staffing gap, adherence — is calculated by a 
 - [x] Milestone 1 — repo setup, synthetic data generator, database
 - [x] Milestone 2 — SQL queries 1–4
 - [x] Milestone 3 — SQL queries 5–8
-- [ ] Milestone 4 — dashboard
+- [x] Milestone 4 — dashboard
 - [ ] Milestone 5 — polish, Vercel deploy, interview notes
 
 ## Try it
@@ -55,14 +55,35 @@ python scripts/verify_queries.py                            # re-check every res
 
 Every query is explained line by line, in plain language, in [docs/LEARNING.md](docs/LEARNING.md).
 
+## The dashboard
+
+A static web page in [`dashboard/`](dashboard/): KPI cards, a forecast vs actual chart, a service-level heatmap (weekday × hour), a staffing-gap chart, filters for queue and date range, and a **"Show the SQL"** panel under every chart that displays the exact query behind it.
+
+```bash
+python scripts/export_dashboard.py                        # run the SQL, write dashboard/data/*.json
+python -m http.server 8000 --directory dashboard          # then open http://localhost:8000
+```
+
+(Open it through the small web server above; double-clicking `index.html` cannot load the data files.)
+
+```
+data/wfm.db -> sql/dashboard/*.sql -> scripts/export_dashboard.py -> dashboard/data/*.json -> the page
+              (all the logic)        (runs the SQL, no logic)        (committed to git)       (draws it)
+```
+
+**One deliberate compromise.** To let you pick any queue and date range without a server, the SQL exports *building blocks* (contacts offered, answered within 20 s, abandons, handle seconds ... per day or per hour). The browser adds up the rows you selected and divides once ("add up first, divide once"). Every metric definition lives in the SQL files; the JavaScript never defines a metric. [`scripts/verify_queries.py`](scripts/verify_queries.py) checks the exported numbers against the standalone queries (for example 102,045 contacts and 83.6% service level for the full period).
+
+Known limits: light theme only; Chart.js 4.4.7 is vendored in [`dashboard/vendor/`](dashboard/vendor/) (see its README); the staffing need is the simplified formula, not Erlang C.
+
 ## Project layout
 
 | Path | What |
 |---|---|
-| `sql/` | One `.sql` file per business question |
+| `sql/` | One `.sql` file per business question (`sql/dashboard/` feeds the dashboard) |
+| `dashboard/` | The static dashboard (HTML, CSS, JS, exported JSON) |
 | `data/schema.sql` | Table definitions |
 | `data/wfm.db` | The SQLite database |
-| `scripts/` | Data generator, query runner (`run_sql.py`), query checker (`verify_queries.py`) |
+| `scripts/` | Data generator, query runner (`run_sql.py`), query checker (`verify_queries.py`), dashboard export (`export_dashboard.py`) |
 | `docs/DATA.md` | What each column means and how the fake data is shaped |
 | `docs/LEARNING.md` | Plain-language SQL explanations |
 | `CLAUDE.md` | The working rules for the AI assistant |
