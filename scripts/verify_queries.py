@@ -123,4 +123,84 @@ ok = set(sql8) == set(tot) and all(
 )
 check(f"08 adherence: {len(sql8)} team/agent rows match", ok)
 
+# ---- dashboard queries (sql/dashboard) ----
+def rows_by(sql_rows, key_cols):
+    return {tuple(r[c] for c in key_cols): r for r in sql_rows}
+
+
+# D1. KPI building blocks per day and queue
+d1 = rows_by(run("dashboard/01_kpi_daily.sql"), ("date", "queue"))
+exp = defaultdict(lambda: defaultdict(int))
+for x in raw:
+    if x["offered"] > 0:
+        e = exp[(x["date"], x["queue"])]
+        e["offered"] += x["offered"]
+        e["answered"] += x["answered"]
+        e["abandoned"] += x["abandoned"]
+        e["answered_within_20s"] += x["answered_within_20s"]
+        e["handle_seconds"] += x["aht_seconds"] * x["answered"]
+        e["abs_forecast_error"] += abs(x["offered"] - x["forecast_offered"])
+ok = set(d1) == set(exp) and all(all(d1[k][c] == v for c, v in e.items()) for k, e in exp.items())
+check(f"D1 kpi_daily: {len(d1)} day/queue rows match", ok)
+
+# D2. forecast vs actual per day and queue
+d2 = rows_by(run("dashboard/02_forecast_vs_actual_daily.sql"), ("date", "queue"))
+fc, ac = defaultdict(int), defaultdict(int)
+for x in raw:
+    fc[(x["date"], x["queue"])] += x["forecast_offered"]
+    ac[(x["date"], x["queue"])] += x["offered"]
+check("D2 forecast_vs_actual_daily", set(d2) == set(fc) and all(
+    d2[k]["forecast_offered"] == fc[k] and d2[k]["offered"] == ac[k] for k in fc))
+
+# D3. heatmap blocks per day, queue, hour (weekday 1 = Monday)
+d3 = rows_by(run("dashboard/03_service_level_heatmap.sql"), ("date", "queue", "hour"))
+exp3 = defaultdict(lambda: [0, 0])
+for x in raw:
+    k = (x["date"], x["queue"], int(x["interval_start"][:2]))
+    exp3[k][0] += x["offered"]
+    exp3[k][1] += x["answered_within_20s"]
+check(f"D3 heatmap: {len(d3)} day/queue/hour rows match", set(d3) == set(exp3) and all(
+    [d3[k]["offered"], d3[k]["answered_within_20s"]] == v
+    and d3[k]["weekday"] == date.fromisoformat(k[0]).weekday() + 1 for k, v in exp3.items()))
+
+# D4. staffing blocks per day, queue, hour
+d4 = rows_by(run("dashboard/04_staffing_gap_hourly.sql"), ("date", "queue", "hour"))
+exp4 = defaultdict(lambda: [0, 0, 0.0, 0])
+for x in raw:
+    need = x["offered"] * x["aht_seconds"] / 1800 / 0.85
+    e = exp4[(x["date"], x["queue"], int(x["interval_start"][:2]))]
+    e[0] += 1
+    e[1] += x["scheduled_agents"]
+    e[2] += need
+    e[3] += x["scheduled_agents"] < need
+check(f"D4 staffing_gap_hourly: {len(d4)} day/queue/hour rows match", set(d4) == set(exp4) and all(
+    (d4[k]["intervals"], d4[k]["scheduled_agent_intervals"], d4[k]["short_intervals"]) == (v[0], v[1], v[3])
+    and abs(d4[k]["needed_agent_intervals"] - v[2]) < 0.002 for k, v in exp4.items()))
+
+# Reconciliation: dashboard building blocks must agree with the standalone queries 01-08
+q1_total = sum(r["offered_contacts"] for r in run("01_offered_per_day_queue.sql"))
+ok = sum(r["offered"] for r in d1.values()) == q1_total == sum(r["offered"] for r in d2.values()) \
+    == sum(r["offered"] for r in d3.values())
+q3 = run("03_service_level_per_interval.sql")
+ok &= sum(r["answered_within_20s"] for r in d1.values()) == sum(r["answered_within_20s"] for r in q3) \
+    == sum(r["answered_within_20s"] for r in d3.values())
+q5 = {r["queue"]: r["wape_pct"] for r in run("05_forecast_accuracy.sql")}
+for queue, wape in q5.items():
+    err = sum(r["abs_forecast_error"] for k, r in d1.items() if k[1] == queue)
+    off = sum(r["offered"] for k, r in d1.items() if k[1] == queue)
+    ok &= abs(100 * err / off - wape) < 0.06
+q7 = run("07_staffing_gap.sql")
+ok &= sum(r["short_intervals"] for r in d4.values()) == sum(r["status"] == "short" for r in q7)
+ok &= abs(sum(r["needed_agent_intervals"] for r in d4.values()) - sum(r["agents_needed"] for r in q7)) < 5
+check("D5 dashboard totals reconcile with queries 01, 03, 05, 07", ok)
+
+# Exported JSON must be up to date with the SQL files and the database
+import json
+ok = True
+for f in sorted((ROOT / "sql" / "dashboard").glob("*.sql")):
+    j = json.loads((ROOT / "dashboard" / "data" / f"{f.stem}.json").read_text(encoding="utf-8"))
+    fresh = [list(r) for r in con.execute(f.read_text(encoding="utf-8")).fetchall()]
+    ok &= j["rows"] == fresh and j["sql"] == f.read_text(encoding="utf-8")
+check("D6 dashboard/data/*.json is up to date (run scripts/export_dashboard.py if not)", ok)
+
 sys.exit(1 if failed else 0)

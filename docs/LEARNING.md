@@ -544,3 +544,160 @@ agent  Alpha    AGT-001   Support-EN             37              17760          
 **Honest note:** the generator gives each agent a stable personal adherence level (84 to 97%) plus daily noise, so the same agents show up as low every time. That is realistic, but it is by construction. Also, adherence has no effect on service level in this fake data, so don't read causality into it.
 
 **Try it yourself:** replace the last line with `ORDER BY level DESC, adherence_pct ASC;` and the lowest adherence comes first within each level (Bravo at the top of the teams, AGT-068 at the top of the agents).
+
+---
+
+## Dashboard queries (`sql/dashboard/`)
+
+The dashboard is a static web page: there is no server and no database behind it. The queries below run once, when you run `python scripts/export_dashboard.py`, and their results are saved as JSON files that the page reads.
+
+**Why these queries look different from 1–8.** The dashboard lets you pick *any* queue and *any* date range. The page can't re-run SQL, so each query exports **building blocks** (counts and sums per day, or per day and hour). When you change a filter, the page adds up the blocks of the rows you selected and then divides **once**: *add up first, divide once*, exactly like Queries 4, 5 and 8. The definitions of every metric live in the SQL headers; the page only adds and divides. (Averaging ready-made percentages would be wrong, see Query 4.)
+
+Worked example, Support-EN for the first week (2026-08-03 to 2026-08-08), six day-rows of query D1 added up:
+
+| Block | Sum | KPI | How |
+|---|---|---|---|
+| offered | 6,284 | | |
+| answered_within_20s | 5,685 | Service level **90.5%** | 5,685 ÷ 6,284 |
+| abandoned | 193 | Abandon rate **3.1%** | 193 ÷ 6,284 (the same 3.07% as Query 4) |
+| handle_seconds | 2,536,821 | AHT **416.5 s** | 2,536,821 ÷ 6,091 answered |
+| abs_forecast_error | 815 | Forecast error (WAPE) **13.0%** | 815 ÷ 6,284 |
+
+---
+
+### D1 — KPI building blocks per day and queue
+
+**File:** `sql/dashboard/01_kpi_daily.sql` · **Feeds:** KPI cards 1–5
+**Business question:** What are the building blocks of the headline KPIs, per day and queue?
+
+```sql
+SELECT
+    date,
+    queue,
+    SUM(offered)                                AS offered,
+    SUM(answered)                               AS answered,
+    SUM(abandoned)                              AS abandoned,
+    SUM(answered_within_20s)                    AS answered_within_20s,
+    SUM(aht_seconds * answered)                 AS handle_seconds,
+    SUM(ABS(offered - forecast_offered))        AS abs_forecast_error
+FROM intervals
+WHERE offered > 0
+GROUP BY date, queue
+ORDER BY date, queue;
+```
+
+**Line by line**
+
+| Line | What it means |
+|---|---|
+| `SUM(offered)`, `SUM(answered)`, `SUM(abandoned)`, `SUM(answered_within_20s)` | Add up each count over the 24 half-hours of the day, per queue (the `GROUP BY` buckets, as in Query 1). |
+| `SUM(aht_seconds * answered)` | **Total handle seconds**: each interval's average × its contacts, added up (the numerator of the weighted AHT in Query 2). |
+| `SUM(ABS(offered - forecast_offered))` | Total size of the forecast misses in contacts (Query 5's WAPE numerator). |
+| `WHERE offered > 0` | Skip intervals with no contacts, as in Query 5. They add 0 to every other column, so only the forecast error is affected. |
+| `GROUP BY date, queue` | One row per day per queue: 48 × 3 = 144 rows. |
+
+**Result:** 144 rows. For the whole period the blocks give 102,045 contacts, service level 83.6%, abandon rate 4.5%, AHT about 7:47, forecast error (WAPE) 15.2%. The first row is `2026-08-03, Billing-EN, 701, 681, 20, 606, 363401, 132`.
+
+**Try it yourself:** change `GROUP BY date, queue` to `GROUP BY queue`, then delete the `date,` line in `SELECT` and change the `ORDER BY` to `queue`. You get 3 rows with the *period totals* per queue. Dividing them (for example Support-EN: 2,119 ÷ 50,816 = 4.17% abandon rate) gives the same answer the dashboard shows when you leave the full date range.
+
+---
+
+### D2 — Forecast and actual volume per day
+
+**File:** `sql/dashboard/02_forecast_vs_actual_daily.sql` · **Feeds:** the line chart
+**Business question:** How did forecast and actual contact volume compare, day by day?
+
+```sql
+SELECT
+    date,
+    queue,
+    SUM(forecast_offered) AS forecast_offered,
+    SUM(offered)          AS offered
+FROM intervals
+GROUP BY date, queue
+ORDER BY date, queue;
+```
+
+The same pattern as Query 1, with the forecast added beside the actual volume: `SUM(...)` per `GROUP BY date, queue` bucket. 144 rows. The chart draws one line for each column. When "All queues" is selected, the page adds the three queues of each day.
+
+---
+
+### D3 — Service level building blocks per weekday and hour
+
+**File:** `sql/dashboard/03_service_level_heatmap.sql` · **Feeds:** the heatmap
+**Business question:** Which weekdays and hours of the day miss the 80/20 service level?
+
+```sql
+SELECT
+    date,
+    CAST(strftime('%w', date) AS INTEGER)       AS weekday,
+    queue,
+    CAST(substr(interval_start, 1, 2) AS INTEGER) AS hour,
+    SUM(offered)                                AS offered,
+    SUM(answered_within_20s)                    AS answered_within_20s
+FROM intervals
+GROUP BY date, queue, hour
+ORDER BY date, queue, hour;
+```
+
+**Line by line**
+
+| Line | What it means |
+|---|---|
+| `strftime('%w', date)` | `strftime` formats a date. `'%w'` returns the weekday as a number, **0 = Sunday**, 1 = Monday ... 6 = Saturday. Our data has no Sundays, so we see 1 to 6. It comes back as text, so `CAST(... AS INTEGER)` turns it into a number. |
+| `substr(interval_start, 1, 2)` | `substr(text, start, length)` cuts out a piece of text: the first 2 characters of `'08:30'` are `'08'`. |
+| `CAST(... AS INTEGER) AS hour` | Turns `'08'` into the number 8, so the page can sort and label it. |
+| `GROUP BY date, queue, hour` | One bucket per day, queue and hour, which holds that hour's two half-hour intervals. SQLite lets you group by the alias `hour`. `weekday` is not in the `GROUP BY`, but it is calculated from `date`, which is, so every row in a bucket has the same weekday. |
+| `SUM(...)` | The two numbers needed for service level: contacts offered, and contacts answered within 20 seconds. |
+
+**Result:** 1,728 rows (48 days × 3 queues × 12 hours). The first: `2026-08-03, weekday 1, Billing-EN, hour 8, offered 25, answered_within_20s 24`.
+
+**How the page uses it:** for a chosen queue and date range, it adds the rows into 6 × 12 cells (weekday × hour) and divides inside each cell: `answered_within_20s ÷ offered`. Cells under 80% are the weak spots.
+
+**Try it yourself:** add `WHERE queue = 'Support-DE'` on its own line after `FROM intervals`. You get 576 rows (48 × 12), one queue only.
+
+---
+
+### D4 — Staffing building blocks per hour
+
+**File:** `sql/dashboard/04_staffing_gap_hourly.sql` · **Feeds:** the staffing chart and KPI card 6
+**Business question:** By hour of the day, how many agents were needed compared with scheduled, and how often were we short?
+
+```sql
+WITH needed AS (
+    SELECT
+        date,
+        queue,
+        CAST(substr(interval_start, 1, 2) AS INTEGER) AS hour,
+        scheduled_agents,
+        offered * aht_seconds / 1800.0 / 0.85         AS agents_needed
+    FROM intervals
+)
+SELECT
+    date,
+    queue,
+    hour,
+    COUNT(*)                                                       AS intervals,
+    SUM(scheduled_agents)                                          AS scheduled_agent_intervals,
+    ROUND(SUM(agents_needed), 3)                                   AS needed_agent_intervals,
+    SUM(CASE WHEN scheduled_agents < agents_needed THEN 1 ELSE 0 END) AS short_intervals
+FROM needed
+GROUP BY date, queue, hour
+ORDER BY date, queue, hour;
+```
+
+**Line by line**
+
+| Line | What it means |
+|---|---|
+| `WITH needed AS (...)` | The named step from Query 7: it calculates `agents_needed` per interval once (workload ÷ 1,800 ÷ 0.85 occupancy; the simplified formula, not Erlang C). |
+| `COUNT(*) AS intervals` | How many 30-minute intervals are in the bucket (2 per hour). |
+| `SUM(scheduled_agents)` | Scheduled agents added over those intervals. Dividing by `intervals` later gives the *average* agents per interval. |
+| `ROUND(SUM(agents_needed), 3)` | Needed agents added the same way, rounded to 3 decimals to keep the exported file small. |
+| `SUM(CASE WHEN scheduled_agents < agents_needed THEN 1 ELSE 0 END)` | **A counting trick:** the `CASE` gives 1 for every short interval and 0 for the others, so adding it up *counts* the short intervals. This is `status = 'short'` from Query 7. |
+
+**Result:** 1,728 rows. Across all rows: 730 short intervals out of 3,456, which is 21.1%, the same count as Query 7 (`scripts/verify_queries.py` checks that they agree).
+
+**How the page uses it:** average gap for an hour = (Σ scheduled − Σ needed) ÷ (number of half-hour slots). With several queues selected, the gaps of the queues are added within each half-hour, so "All queues" shows the whole center's gap per half-hour. Red bars (below zero) are hours where the schedule is short.
+
+**Honest limits:** the formula is the same simplification as Query 7 (actual workload, 85% occupancy, no shrinkage, no queueing effects). Erlang C would be the next step.

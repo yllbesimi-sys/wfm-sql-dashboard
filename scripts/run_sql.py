@@ -31,8 +31,8 @@ def main():
     args = ap.parse_args()
 
     if not args.file:
-        for p in sorted((ROOT / "sql").glob("*.sql")):
-            print(f"sql/{p.name}\n    {question(p)}")
+        for p in sorted((ROOT / "sql").rglob("*.sql")):
+            print(f"{p.relative_to(ROOT).as_posix()}\n    {question(p)}")
         return
 
     path = Path(args.file)
