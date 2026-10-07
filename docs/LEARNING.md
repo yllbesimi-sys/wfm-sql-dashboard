@@ -272,3 +272,275 @@ week_start  queue       offered  abandoned  abandon_rate_pct
 **Simplification:** the data has no wait times, so we cannot ignore very short abandons (many centers exclude abandons in the first few seconds). Weeks run Monday to Sunday and our data stops on Saturday, so Sunday never appears.
 
 **Try it yourself:** put `WHERE queue = 'Support-DE'` between `FROM` and `GROUP BY` to see one queue's 8 weeks.
+
+---
+
+## Query 5 — Forecast accuracy (MAPE, WAPE, bias)
+
+**File:** `sql/05_forecast_accuracy.sql`
+**Business question:** How far off was the volume forecast, per queue?
+**Why it matters:** Every schedule starts from the forecast. Accuracy says how much to trust it; bias says whether you tend to over- or under-staff.
+
+```sql
+SELECT
+    queue,
+    COUNT(*)                                                                   AS intervals_compared,
+    ROUND(100.0 * AVG(ABS(offered - forecast_offered) * 1.0 / offered), 1)     AS mape_pct,
+    ROUND(100.0 * SUM(ABS(offered - forecast_offered)) / SUM(offered), 1)      AS wape_pct,
+    ROUND(100.0 * (SUM(forecast_offered) - SUM(offered)) / SUM(offered), 1)    AS bias_pct
+FROM intervals
+WHERE offered > 0
+GROUP BY queue
+ORDER BY queue;
+```
+
+**The three measures** (all per 30-minute interval, forecast vs actual `offered`):
+
+| Measure | In words | Good for |
+|---|---|---|
+| **MAPE** (mean absolute percentage error) | For each interval: how far off was the forecast, as a % of what really came in? Then average those %. | The classic number. Every interval counts equally. |
+| **WAPE** (weighted absolute percentage error) | Total miss in contacts ÷ total actual contacts. | Busy intervals count more. Not blown up by tiny intervals. |
+| **Bias** | Total forecast vs total actual, *keeping the sign*. Positive = over-forecast, negative = under-forecast. | Seeing whether you are systematically high or low. |
+
+**Line by line**
+
+| Line | What it means |
+|---|---|
+| `COUNT(*)` | How many rows are in each bucket (here: intervals that were compared). |
+| `ABS(offered - forecast_offered)` | The size of the miss, ignoring direction (`ABS` = absolute value: -5 and 5 both become 5). Without it, over- and under-forecasts would cancel each other out. |
+| `* 1.0 / offered` | Miss as a fraction of the actual volume (`1.0` forces decimal maths, see Query 2). |
+| `AVG(...)` | Average of those fractions over the queue's intervals. `100.0 *` turns it into a percent. That is **MAPE**. |
+| `SUM(ABS(...)) / SUM(offered)` | Add up all the misses, divide by all the actual contacts: **WAPE**. |
+| `SUM(forecast_offered) - SUM(offered)` | No `ABS` here: over and under cancel, so what remains is the **bias**. |
+| `WHERE offered > 0` | Leave out intervals with no actual contacts: a % of zero can't be calculated. `WHERE` runs *before* `GROUP BY` (step 2 in "the order SQL thinks in"), so those 3 rows never reach the buckets. |
+
+**What you should see:**
+
+```
+queue       intervals_compared  mape_pct  wape_pct  bias_pct
+Billing-EN                1152      21.5      15.8      -0.5
+Support-DE                1149      25.3      19.0      -1.6
+Support-EN                1152      15.9      13.4      -0.1
+```
+
+- The smaller the queue, the worse the accuracy: Support-EN (biggest) has 15.9% MAPE, Support-DE (smallest) 25.3%. With 10 to 20 contacts per interval, a miss of 3 or 4 contacts is just normal randomness.
+- Bias is close to zero everywhere: the forecast is not systematically high or low. Yet MAPE is large. Errors cancel out in the total but not interval by interval. That is why one number is never enough.
+- MAPE is higher than WAPE because small intervals have big percentage errors (actual 2, forecast 4 = 100% error) and MAPE gives them full weight.
+
+**Honest note:** in this fake data the forecast is "the true expected volume ± 5% noise", while actual volume adds random arrival noise and unforecast spikes. So most of the error is random and cannot be forecast away. A real forecast has structural errors too (missed trends, campaigns, holidays).
+
+**Try it yourself:** change `WHERE offered > 0` to `WHERE offered >= 20`. MAPE drops (to 14.4 / 16.0 / 14.1) because the tiny intervals are gone. But look at `bias_pct`: Support-DE jumps to -6.6%. That is a trap: choosing intervals by their *actual* volume keeps the ones that happened to come in high, so the forecast looks too low. Never filter on the thing you are measuring against.
+
+---
+
+## Query 6 — Week-over-week volume change (LAG)
+
+**File:** `sql/06_wow_volume_change.sql`
+**Business question:** How did each queue's weekly volume change compared with the week before?
+**Why it matters:** It shows growth, seasonality and one-off events, and whether last week is a fair guide for next week.
+
+```sql
+WITH weekly AS (
+    SELECT
+        date(date, '-6 days', 'weekday 1') AS week_start,
+        queue,
+        SUM(offered)                       AS offered
+    FROM intervals
+    GROUP BY week_start, queue
+),
+with_previous AS (
+    SELECT
+        week_start,
+        queue,
+        offered,
+        LAG(offered) OVER (PARTITION BY queue ORDER BY week_start) AS previous_week_offered
+    FROM weekly
+)
+SELECT
+    week_start,
+    queue,
+    offered,
+    previous_week_offered,
+    offered - previous_week_offered                                           AS change,
+    ROUND(100.0 * (offered - previous_week_offered) / previous_week_offered, 1) AS wow_change_pct
+FROM with_previous
+ORDER BY queue, week_start;
+```
+
+**New idea 1 — `WITH ... AS` (a named step).** It lets you build a result in stages. `weekly` is a small temporary table that exists only while this query runs; `with_previous` builds on it; the last `SELECT` builds on that. Read it top to bottom like a recipe. The inside of `weekly` is exactly the weekly grouping from Query 4.
+
+**New idea 2 — window functions.** `GROUP BY` collapses many rows into one. A *window function* does not collapse anything: every row stays, and it just adds a column calculated by looking at *other* rows. Here `LAG` looks one row back.
+
+**Line by line**
+
+| Line | What it means |
+|---|---|
+| `LAG(offered)` | "The `offered` value from the previous row." |
+| `OVER (...)` | Says *which* previous row: this defines the window. |
+| `PARTITION BY queue` | Handle each queue separately. Without it, Support-DE's first week would borrow Billing-EN's last week. |
+| `ORDER BY week_start` | Inside each queue, "previous" means "the earlier week". |
+| (first week of each queue) | There is no earlier row, so `LAG` gives `NULL`. |
+| `offered - previous_week_offered` | Change in contacts. With `NULL` in it, the answer is `NULL` too. |
+| `100.0 * change / previous_week_offered` | Change as a percent of last week. |
+| `ORDER BY queue, week_start` | Each queue's story reads top to bottom. |
+
+**Why two steps and not one?** Repeating `LAG(...)` three times in the final `SELECT` would be messy; the named step calculates it once and gives it a name.
+
+**What you should see:** 24 rows, 3 of them with `NULL` (week 1 of each queue). Support-EN:
+
+```
+week_start  offered  previous  change  wow_change_pct
+2026-08-03     6284  NULL      NULL    NULL
+2026-08-10     6344  6284        60      1.0
+2026-08-17     6325  6344       -19     -0.3
+2026-08-24     6446  6325       121      1.9
+2026-08-31     6309  6446      -137     -2.1
+```
+
+- Biggest rise: Billing-EN, week of 2026-08-17: **+7.0%** (3,600 to 3,851). Biggest fall: Support-DE, week of 2026-08-10: **-3.1%**.
+- The generator adds about 1% growth per week, but the week-to-week noise (±2%) is larger, so you see wobble around a slow upward drift.
+
+**WFM note:** comparing weeks is only fair when they have the same length and no special days. All 8 weeks here are full Monday to Saturday weeks. With a bank-holiday week you would adjust first.
+
+**Try it yourself:** change `LAG(offered)` to `LAG(offered, 2)` (two weeks back). The first *two* weeks of each queue become `NULL`, and the comparison is with two weeks ago. (The column name `previous_week_offered` would then be misleading, so rename it as well.)
+
+---
+
+## Query 7 — Staffing gap (agents needed vs scheduled)
+
+**File:** `sql/07_staffing_gap.sql`
+**Business question:** In each half-hour, how many agents were needed compared with how many were scheduled?
+**Why it matters:** This is the heart of capacity planning: it shows exactly *when* the schedule is too thin or too generous.
+
+```sql
+WITH needed AS (
+    SELECT
+        date, interval_start, queue, offered, aht_seconds, scheduled_agents,
+        offered * aht_seconds / 1800.0 / 0.85 AS agents_needed
+    FROM intervals
+)
+SELECT
+    date, interval_start, queue, offered, aht_seconds, scheduled_agents,
+    ROUND(agents_needed, 1)                    AS agents_needed,
+    ROUND(scheduled_agents - agents_needed, 1) AS staffing_gap,
+    CASE WHEN scheduled_agents < agents_needed THEN 'short' ELSE 'ok' END AS status
+FROM needed
+ORDER BY date, interval_start, queue;
+```
+
+**The formula — deliberately simple.** In plain steps:
+
+1. **Workload in seconds** = contacts × average handle time.
+2. **Agents it would keep fully busy** = workload ÷ 1,800 (the seconds in one 30-minute interval).
+3. **Agents needed** = that ÷ 0.85 (the *occupancy target*). Agents can't be busy 100% of the time; there must be gaps to breathe and wait for the next contact. At 85% busy, you need about 18% more people than "fully busy".
+4. **Gap** = scheduled − needed. Negative = short-staffed.
+
+Worked example from the output: Billing-EN, 2026-08-03, 09:00. 42 contacts × 529 s = 22,218 s. ÷ 1,800 = 12.3 agents fully busy. ÷ 0.85 = **14.5 needed**. Only 13 were scheduled, so the gap is **-1.5** and the status is `short`.
+
+**Line by line**
+
+| Line | What it means |
+|---|---|
+| `WITH needed AS (...)` | A named step that calculates `agents_needed` once. Otherwise the formula would be pasted three times into the final `SELECT`. |
+| `1800.0` | The `.0` keeps the maths in decimals (see Query 2). |
+| `ROUND(agents_needed, 1)` | Show one decimal. The number stays fractional on purpose (14.5 agents means "between 14 and 15"). |
+| `scheduled_agents - agents_needed` | The gap. |
+| `CASE WHEN scheduled_agents < agents_needed ...` | `short` if scheduled is below needed, else `ok`. It compares the *unrounded* numbers. |
+| `FROM needed` | The final `SELECT` reads from the named step above, not from the raw table. |
+
+**What you should see:** 3,456 rows.
+
+- 730 intervals are `short` (21%) and 2,726 `ok`.
+- When it happens: 64% of the 19:00 to 19:59 intervals are short, 56% of the 10:00 to 10:59 intervals, and only 2% of the 12:00 to 12:59 ones. Thin evening cover and an under-covered morning peak, with a comfortable lunch.
+- Worst gap: Support-EN, Monday 2026-09-21, 10:00: 103 contacts at 406 s needed **27.3** agents; only **15** were scheduled (gap -12.3).
+- Most over-staffed: Support-EN, 2026-09-10, 12:00: 23 contacts needed 5.5 agents; 23 were scheduled (gap +17.5).
+
+**WFM note — averages hide the problem.** Add up all gaps and each queue has a *surplus* (e.g. Support-EN +4,291 agent-intervals). Yet 730 intervals are short. You can't use the extra people at 12:00 to cover the shortage at 10:00, so the interval view matters.
+
+**Honest limits (also in the SQL comments):**
+- This is a **simplification, not Erlang C.** Erlang C is the industry-standard method: it also considers how contacts queue up and the service-level target (80/20), and usually needs more agents than this formula. It is the natural next step for this project.
+- It uses **actual** contacts and AHT (hindsight), not the forecast.
+- There is **no shrinkage** (breaks, meetings, training); lunch is already out of `scheduled_agents`.
+- The data generator's planner used the same idea (workload ÷ 85% occupancy), so this query agrees with the data *by construction*. It is a good illustration, not independent proof that the method is right.
+
+**Try it yourself:** change `0.85` to `0.75` (a relaxed target, more people needed): short intervals rise from 730 to 1,066. Change it to `0.90`: they fall to 587. One number in the query changes the whole staffing picture.
+
+---
+
+## Query 8 — Adherence per team and per agent
+
+**File:** `sql/08_adherence_team_agent.sql`
+**Business question:** How well did each team, and each agent, stick to their schedule?
+**Why it matters:** Low adherence means the agents you scheduled weren't really available, so you get less capacity than planned. Team level shows patterns; agent level shows who needs a conversation.
+
+```sql
+SELECT
+    'team'                    AS level,
+    a.team,
+    NULL                      AS agent_id,
+    a.queue,
+    COUNT(*)                  AS shifts_worked,
+    SUM(h.scheduled_minutes)  AS scheduled_minutes,
+    SUM(h.adherent_minutes)   AS adherent_minutes,
+    ROUND(100.0 * SUM(h.adherent_minutes) / SUM(h.scheduled_minutes), 1) AS adherence_pct
+FROM adherence AS h
+JOIN agents    AS a ON a.agent_id = h.agent_id
+GROUP BY a.team, a.queue
+
+UNION ALL
+
+SELECT
+    'agent',
+    a.team,
+    h.agent_id,
+    a.queue,
+    COUNT(*),
+    SUM(h.scheduled_minutes),
+    SUM(h.adherent_minutes),
+    ROUND(100.0 * SUM(h.adherent_minutes) / SUM(h.scheduled_minutes), 1)
+FROM adherence AS h
+JOIN agents    AS a ON a.agent_id = h.agent_id
+GROUP BY a.team, a.queue, h.agent_id
+
+ORDER BY level DESC, team, agent_id;
+```
+
+**New idea 1 — `JOIN` (combining two tables).** The `adherence` table knows *which agent* worked *how many minutes*, but not the agent's team. The `agents` table knows the team. `JOIN agents ON a.agent_id = h.agent_id` says: "for each adherence row, find the agents row with the same `agent_id` and attach its columns." Now every adherence row also carries `team` and `queue`.
+`AS h` and `AS a` are short nicknames for the two tables, so `h.scheduled_minutes` means "the `scheduled_minutes` column from `adherence`". (A plain `JOIN` keeps only rows that find a match. All 69 agents exist in both tables, so nothing is lost.)
+
+**New idea 2 — `UNION ALL` (stacking results).** The first `SELECT` produces the 4 team rows, the second the 69 agent rows, and `UNION ALL` stacks them into one result. Both halves must have the same columns in the same order; the column names come from the first one. (`UNION` without `ALL` also removes duplicates, which we don't need.)
+
+**Line by line**
+
+| Line | What it means |
+|---|---|
+| `'team' AS level` | A constant text in every row of this half, so you can tell team rows from agent rows. |
+| `NULL AS agent_id` | A team has no single agent; `NULL` fills the slot so both halves have the same columns. |
+| `COUNT(*) AS shifts_worked` | Rows in the bucket = shifts worked (one adherence row per agent per day worked). |
+| `SUM(...)` for minutes | Total scheduled and total adherent minutes in the bucket. |
+| `100.0 * SUM(adherent) / SUM(scheduled)` | Adherence %: **add up, then divide once.** A 7-hour day weighs less than an 8-hour day, as it should. |
+| `GROUP BY a.team, a.queue` | One bucket per team (4). `queue` is included only because we show it; each team belongs to one queue. |
+| `GROUP BY a.team, a.queue, h.agent_id` | One bucket per agent (69). |
+| `ORDER BY level DESC, team, agent_id` | Sorts the whole stacked result. `'team'` comes after `'agent'` in the alphabet, so `DESC` puts the team rows first. After a `UNION`, `ORDER BY` can only use the result's column names (no `a.` / `h.`). |
+
+**What you should see:** 73 rows (4 team + 69 agent).
+
+```
+level  team     agent_id  queue       shifts_worked  scheduled_minutes  adherent_minutes  adherence_pct
+team   Alpha    NULL      Support-EN            572             271380            246512           90.8
+team   Bravo    NULL      Support-EN            579             274680            242343           88.2
+team   Charlie  NULL      Support-DE            580             275340            250508           91.0
+team   Delta    NULL      Billing-EN            932             442440            397684           89.9
+agent  Alpha    AGT-001   Support-EN             37              17760             16476           92.8
+```
+
+- Bravo is the lowest team at 88.2%; Charlie is the highest at 91.0%.
+- Agents range from **96.4%** (AGT-061) down to **83.8%** (AGT-068), both on team Delta. 10 of the 69 agents are below 85%.
+
+**WFM notes**
+- A team's adherence is *not* the average of its agents' percentages: it is weighted by minutes (add up, then divide), the same reasoning as Query 4.
+- Adherence is not occupancy or conformance: it only says whether the agent was in the right state at the scheduled time.
+
+**Honest note:** the generator gives each agent a stable personal adherence level (84 to 97%) plus daily noise, so the same agents show up as low every time. That is realistic, but it is by construction. Also, adherence has no effect on service level in this fake data, so don't read causality into it.
+
+**Try it yourself:** replace the last line with `ORDER BY level DESC, adherence_pct ASC;` and the lowest adherence comes first within each level (Bravo at the top of the teams, AGT-068 at the top of the agents).

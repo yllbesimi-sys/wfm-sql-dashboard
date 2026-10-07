@@ -21,7 +21,7 @@ abandon rate, forecast accuracy, staffing gap, adherence — is calculated by a 
 
 - [x] Milestone 1 — repo setup, synthetic data generator, database
 - [x] Milestone 2 — SQL queries 1–4
-- [ ] Milestone 3 — SQL queries 5–8
+- [x] Milestone 3 — SQL queries 5–8
 - [ ] Milestone 4 — dashboard
 - [ ] Milestone 5 — polish, Vercel deploy, interview notes
 
@@ -48,6 +48,10 @@ python scripts/verify_queries.py                            # re-check every res
 | [`02_aht_per_queue`](sql/02_aht_per_queue.sql) | Average handle time per queue (weighted by contacts) |
 | [`03_service_level_per_interval`](sql/03_service_level_per_interval.sql) | Service level per interval vs the 80/20 target |
 | [`04_abandon_rate_weekly`](sql/04_abandon_rate_weekly.sql) | Abandon rate per queue per week |
+| [`05_forecast_accuracy`](sql/05_forecast_accuracy.sql) | Forecast vs actual: MAPE, WAPE and bias per queue |
+| [`06_wow_volume_change`](sql/06_wow_volume_change.sql) | Week-over-week volume change (window function `LAG`) |
+| [`07_staffing_gap`](sql/07_staffing_gap.sql) | Agents needed vs scheduled per interval (simple formula, not Erlang C) |
+| [`08_adherence_team_agent`](sql/08_adherence_team_agent.sql) | Schedule adherence per team and per agent |
 
 Every query is explained line by line, in plain language, in [docs/LEARNING.md](docs/LEARNING.md).
 

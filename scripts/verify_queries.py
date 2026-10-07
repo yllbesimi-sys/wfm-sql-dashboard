@@ -69,4 +69,58 @@ ok = set(sql4) == set(off) and all(
 )
 check(f"04 abandon rate weekly: {len(sql4)} week/queue rows match", ok)
 
+# 5. forecast accuracy per queue (intervals with zero actual contacts are left out)
+ok = True
+for r in run("05_forecast_accuracy.sql"):
+    q = [x for x in raw if x["queue"] == r["queue"] and x["offered"] > 0]
+    tot = sum(x["offered"] for x in q)
+    mape = 100 * sum(abs(x["offered"] - x["forecast_offered"]) / x["offered"] for x in q) / len(q)
+    wape = 100 * sum(abs(x["offered"] - x["forecast_offered"]) for x in q) / tot
+    bias = 100 * (sum(x["forecast_offered"] for x in q) - tot) / tot
+    ok &= r["intervals_compared"] == len(q) and all(
+        abs(r[k] - v) < 0.06 for k, v in (("mape_pct", mape), ("wape_pct", wape), ("bias_pct", bias)))
+check("05 forecast accuracy (MAPE, WAPE, bias)", ok)
+
+# 6. week-over-week change (previous week of the same queue)
+weekly = defaultdict(int)
+for x in raw:
+    d = date.fromisoformat(x["date"])
+    weekly[(x["queue"], (d - timedelta(days=d.weekday())).isoformat())] += x["offered"]
+sql6 = {(r["queue"], r["week_start"]): r for r in run("06_wow_volume_change.sql")}
+ok = set(sql6) == set(weekly)
+for (queue, wk), r in sql6.items():
+    prev = weekly.get((queue, (date.fromisoformat(wk) - timedelta(days=7)).isoformat()))
+    if prev is None:
+        ok &= r["previous_week_offered"] is None and r["wow_change_pct"] is None
+    else:
+        ok &= r["previous_week_offered"] == prev and abs(r["wow_change_pct"] - 100 * (r["offered"] - prev) / prev) < 0.06
+check(f"06 week-over-week change: {len(sql6)} rows match", ok)
+
+# 7. staffing gap (workload / 1800 / 0.85 occupancy)
+sql7 = {(r["date"], r["interval_start"], r["queue"]): r for r in run("07_staffing_gap.sql")}
+ok = len(sql7) == len(raw)
+for x in raw:
+    r = sql7[(x["date"], x["interval_start"], x["queue"])]
+    need = x["offered"] * x["aht_seconds"] / 1800 / 0.85
+    ok &= (abs(r["agents_needed"] - need) < 0.06 and abs(r["staffing_gap"] - (x["scheduled_agents"] - need)) < 0.06
+           and r["status"] == ("short" if x["scheduled_agents"] < need else "ok"))
+check(f"07 staffing gap: {len(sql7)} intervals match", ok)
+
+# 8. adherence per team and per agent (the JOIN done by hand with a dict)
+team_of = {r["agent_id"]: (r["team"], r["queue"]) for r in con.execute("SELECT * FROM agents")}
+tot = defaultdict(lambda: [0, 0, 0])
+for r in con.execute("SELECT * FROM adherence"):
+    team, queue = team_of[r["agent_id"]]
+    for key in (("team", team, None, queue), ("agent", team, r["agent_id"], queue)):
+        tot[key][0] += 1
+        tot[key][1] += r["scheduled_minutes"]
+        tot[key][2] += r["adherent_minutes"]
+sql8 = {(r["level"], r["team"], r["agent_id"], r["queue"]): r for r in run("08_adherence_team_agent.sql")}
+ok = set(sql8) == set(tot) and all(
+    (r["shifts_worked"], r["scheduled_minutes"], r["adherent_minutes"]) == tuple(tot[k])
+    and abs(r["adherence_pct"] - 100 * tot[k][2] / tot[k][1]) < 0.06
+    for k, r in sql8.items()
+)
+check(f"08 adherence: {len(sql8)} team/agent rows match", ok)
+
 sys.exit(1 if failed else 0)
