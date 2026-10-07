@@ -16,14 +16,15 @@ random seed (`42`), so running it again gives the identical database. Table defi
 | `answered` / `abandoned` | Picked up by an agent / hung up while waiting |
 | `aht_seconds` | Average handle time of the interval |
 | `answered_within_20s` | Answered contacts picked up within 20 seconds |
-| `scheduled_agents` | Agents scheduled on the queue in that interval |
+| `scheduled_agents` | Agents on shift for the queue in that interval (lunch breaks excluded) |
 
-### `agents` — 76 rows
+### `agents` — 69 rows
 `agent_id` (`AGT-001`…), `team` (Alpha, Bravo, Charlie, Delta — made up), `queue`.
 
-### `adherence` — ~3,000 rows
-One row per agent per working day: `scheduled_minutes` and `adherent_minutes`. Each agent has a typical adherence level
-(84–97%) plus daily noise; each agent has roughly one day off in six.
+### `adherence` — ~2,700 rows
+One row per agent per working day: `scheduled_minutes` (paid minutes of the shift: 480 full-time, 420 part-time) and
+`adherent_minutes`. Each agent has a typical adherence level (84–97%) plus daily noise. These rows come from the same
+shifts that produce `scheduled_agents`, so the two tables agree (agent-minutes on shift = scheduled minutes).
 
 ## How the fake data is shaped
 
@@ -32,15 +33,25 @@ One row per agent per working day: `scheduled_minutes` and `adherent_minutes`. E
   peak ~10:30, lunch dip, afternoon bump ~15:00) × a small weekly growth trend, with random noise.
 - **Forecast:** the same expected volume with ±5% noise. The forecast does *not* know about spikes or "busy days".
 - **Spikes:** 5 unforecast spikes (3–5 intervals each, ~2× volume) on random queues/days.
-- **Staffing:** the "planner" schedules from the forecast using workload ÷ 85% occupancy, with an 8–25% buffer; about 7%
-  of intervals are deliberately short-staffed. Scheduled agents are capped at the queue's roster size.
+- **Shifts and staffing:** each agent works a real shift: 8.5h (480 paid minutes) or, for 1 in 4, 7.5h part-time (420
+  paid), starting on a half-hour, with one 30-minute lunch 4–5 hours in. A greedy "planner" places the shifts where the
+  *forecast* shows the biggest uncovered need (workload ÷ 85% occupancy, +10% buffer); one agent always opens and one
+  always closes. `scheduled_agents` = agents on shift and not at lunch.
+- **Who works:** about 12% of agents are off on a weekday and 45% on Saturday; on ~6% of queue-days a "leave cluster"
+  (35% off) leaves the queue thin. The roster is limited, so the planner cannot cover everything.
+- **What this creates:** headcount moves in shift-sized steps, not along the forecast curve. Typical results: peak
+  mornings (esp. Mondays) are under-covered, midday is over-covered, and the last hour of the day is thin — the kind of
+  gaps the staffing-gap query will show. Measured: service level is ~75% on Mondays vs ~91% on Fridays, ~76% from
+  09:00–12:00 vs ~95% from 12:00–14:00, and ~39% in the last hour (19:00–20:00).
 - **Service level / abandons:** derived from how loaded the agents are (offered workload ÷ scheduled capacity). When
   agents are overloaded, fewer contacts are answered in 20 seconds and more callers abandon.
 
 ## Simplifications (honest list)
 
 - Service level is produced by a smooth S-curve of agent load, **not by Erlang C** or a real queue simulation.
-- `adherence` is generated independently of `scheduled_agents`; the two tables are not reconciled.
-- Arrivals are Poisson-like (normal approximation); no intra-interval patterns, no multi-skill agents, no shrinkage
-  modelling, no holidays.
-- Whole-period results land around 83–84% service level and 4–5% abandons — plausible, but tuned by hand.
+- Shifts are placed by a simple greedy rule, not a real scheduling optimiser. Everyone has one lunch and nothing else:
+  no breaks, meetings, coaching or training ("shrinkage"), no skills, no unplanned absence or lateness.
+- Because shortages come from shift shape and roster limits, adherence is not tied to service level (an agent's adherence
+  doesn't change what happens in the queue).
+- Arrivals are Poisson-like (normal approximation); no intra-interval patterns, no multi-skill agents, no holidays.
+- Whole-period results land around 83% service level and 4–5% abandons, with about 1 in 5 intervals missing 80/20 — plausible, but tuned by hand.
