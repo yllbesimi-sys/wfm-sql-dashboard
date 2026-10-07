@@ -1,4 +1,4 @@
-﻿"""Generate the FICTIONAL contact-center dataset into data/wfm.db.
+"""Generate the FICTIONAL contact-center dataset into data/wfm.db.
 
 Everything here is synthetic. A fixed random seed makes the output identical on every run.
 Run:  python scripts/generate_data.py
