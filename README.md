@@ -20,7 +20,7 @@ abandon rate, forecast accuracy, staffing gap, adherence — is calculated by a 
 ## Status
 
 - [x] Milestone 1 — repo setup, synthetic data generator, database
-- [ ] Milestone 2 — SQL queries 1–4
+- [x] Milestone 2 — SQL queries 1–4
 - [ ] Milestone 3 — SQL queries 5–8
 - [ ] Milestone 4 — dashboard
 - [ ] Milestone 5 — polish, Vercel deploy, interview notes
@@ -34,14 +34,31 @@ python scripts/generate_data.py   # rebuilds data/wfm.db (same result every time
 python scripts/check_data.py      # prints row counts and sample rows
 ```
 
+Run the SQL queries (each one is a plain file in [`sql/`](sql/)):
+
+```bash
+python scripts/run_sql.py                                   # list the queries
+python scripts/run_sql.py sql/02_aht_per_queue.sql          # run one and see the result table
+python scripts/verify_queries.py                            # re-check every result with plain Python
+```
+
+| Query | Question it answers |
+|---|---|
+| [`01_offered_per_day_queue`](sql/01_offered_per_day_queue.sql) | Contacts offered per day, per queue |
+| [`02_aht_per_queue`](sql/02_aht_per_queue.sql) | Average handle time per queue (weighted by contacts) |
+| [`03_service_level_per_interval`](sql/03_service_level_per_interval.sql) | Service level per interval vs the 80/20 target |
+| [`04_abandon_rate_weekly`](sql/04_abandon_rate_weekly.sql) | Abandon rate per queue per week |
+
+Every query is explained line by line, in plain language, in [docs/LEARNING.md](docs/LEARNING.md).
+
 ## Project layout
 
 | Path | What |
 |---|---|
-| `sql/` | One `.sql` file per business question (from Milestone 2) |
+| `sql/` | One `.sql` file per business question |
 | `data/schema.sql` | Table definitions |
 | `data/wfm.db` | The SQLite database |
-| `scripts/` | Data generator and helper scripts |
+| `scripts/` | Data generator, query runner (`run_sql.py`), query checker (`verify_queries.py`) |
 | `docs/DATA.md` | What each column means and how the fake data is shaped |
 | `docs/LEARNING.md` | Plain-language SQL explanations |
 | `CLAUDE.md` | The working rules for the AI assistant |
